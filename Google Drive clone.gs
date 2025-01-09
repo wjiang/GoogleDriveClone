@@ -62,15 +62,15 @@ function driveClone() {
 //There's no sanity checking. If you choose to skip a required phase it will let you, but the rest of the process won't work. 
 //You probably only want to try to skip the sharing and starring phases. You could skip the file copy phase and it would just create a directory tree. 
   const jobPhases = [
-    { logMessage: "Phase 0 - Drive Traversal", callbackFunction: cloneJobSetup_, travObject: false , skipPhase: false},
-    { logMessage: "Phase 1 - Creating Folders", callbackFunction: createFolders_, travObject: true , skipPhase: false},
-    { logMessage: "Phase 2 - Folder Sharing", callbackFunction: setFolderSharing_, travObject: true , skipPhase: false},
-    { logMessage: "Phase 3 - Folder Stars", callbackFunction: setFolderStars_, travObject: true , skipPhase: false},
-    { logMessage: "Phase 4 - Build File List", callbackFunction: findFiles_, travObject: true , skipPhase: false},
-    { logMessage: "Phase 5 - File Copy/Move", callbackFunction: copyFiles_, travObject: true , skipPhase: false},
-    { logMessage: "Phase 6 - File Sharing", callbackFunction: setFileSharing_, travObject: true , skipPhase: false},
-    { logMessage: "Phase 7 - File Stars", callbackFunction: setFileStars_, travObject: true , skipPhase: false},
-    { logMessage: "Phase 8 - Cleanup", callbackFunction: cloneJobFinish_, travObject: false , skipPhase: false},
+    { logMessage: "Phase 0 - Drive Traversal", callbackFunction: cloneJobSetup_, travObject: false, skipPhase: false },
+    { logMessage: "Phase 1 - Creating Folders", callbackFunction: createFolders_, travObject: true, skipPhase: false },
+    { logMessage: "Phase 2 - Folder Sharing", callbackFunction: setFolderSharing_, travObject: true, skipPhase: true },
+    { logMessage: "Phase 3 - Folder Stars", callbackFunction: setFolderStars_, travObject: true, skipPhase: true },
+    { logMessage: "Phase 4 - Build File List", callbackFunction: findFiles_, travObject: true, skipPhase: false },
+    { logMessage: "Phase 5 - File Copy/Move", callbackFunction: copyFiles_, travObject: true, skipPhase: false },
+    { logMessage: "Phase 6 - File Sharing", callbackFunction: setFileSharing_, travObject: true, skipPhase: true },
+    { logMessage: "Phase 7 - File Stars", callbackFunction: setFileStars_, travObject: true, skipPhase: true },
+    { logMessage: "Phase 8 - Cleanup", callbackFunction: cloneJobFinish_, travObject: false, skipPhase: false }
   ];
 
 //If we're moving files we can skip the file sharing and file stars. 
@@ -191,6 +191,10 @@ function createFolders_(folder) {
     let driveParentFolder = DriveApp.getFolderById(folder.parentId);
     let newDriveFolder = driveParentFolder.createFolder(folder.name);
     let newFolderId = newDriveFolder.getId();
+
+    let driveSourceFolder = DriveApp.getFolderById(folder.id);
+    setModifiedDate(newFolderId, driveSourceFolder.getLastUpdated());
+    
     folder.destId = newFolderId;
     cloneJob.folderCount++;
     folder.phase = 1;
@@ -327,20 +331,46 @@ function copyFiles_(folder) {
           cloneJob.fileCount++;
         }
         else {
-          driveDestFile = driveSourceFile.makeCopy(file.name, driveDestFolder);
-          cloneJob.fileCount++;
-          file.destId = driveDestFile.getId();
+          // Check if the source file is a shortcut (link)
+          if (driveSourceFile.getMimeType() === 'application/vnd.google-apps.shortcut') {
+            // Get the target ID of the shortcut
+            let targetId = driveSourceFile.getTargetId();
+            // Get the target file
+            let targetFile = DriveApp.getFileById(targetId);
+            // Copy the target file instead of the shortcut
+            let driveDestFile = targetFile.makeCopy(file.name, driveDestFolder);
+            cloneJob.fileCount++;
+            file.destId = driveDestFile.getId();
+          } else {
+            // If not a shortcut, proceed with the original file
+            let driveDestFile = driveSourceFile.makeCopy(file.name, driveDestFolder);
+            cloneJob.fileCount++;
+            file.destId = driveDestFile.getId();
+          }
+          setModifiedDate(file.destId, driveSourceFile.getLastUpdated());
         }
       }
       catch (error) {
         Logger.log("Failed copying file " + file.name + " " + error);
         file.destId = "FAILED";
         cloneJob.failures++;
-        cloneJob.failureList.push({ "name": sourceFile.getName(), "id": sourceFile.getId(), "message": error });
+        cloneJob.failureList.push({ "name": driveSourceFile.getName(), "id": driveSourceFile.getId(), "message": error });
       }
     }
   }
   folder.phase = 5;
+}
+function setModifiedDate(fileId, modifiedTime) {
+  Drive.Files.update(
+    {
+      modifiedTime: modifiedTime.toISOString()
+    },
+    fileId,
+    null,
+    {
+      supportsAllDrives: true
+    }
+  );
 }
 //----------------------------------------------\\
 function getUserEmails_(obj, userClass) {
